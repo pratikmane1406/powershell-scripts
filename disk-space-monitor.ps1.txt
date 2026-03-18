@@ -1,0 +1,50 @@
+# ============================================
+# Script: Disk Space Monitor
+# Description: Checks disk usage and alerts if low space detected
+# Author: Your Name
+# ============================================
+
+# Threshold (in percentage)
+$Threshold = 20
+
+# Log file path
+$LogFile = "C:\Logs\DiskSpaceReport.txt"
+
+# Create log directory if not exists
+if (!(Test-Path "C:\Logs")) {
+    New-Item -Path "C:\" -Name "Logs" -ItemType Directory
+}
+
+# Get disk details
+$Disks = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"
+
+$AlertTriggered = $false
+
+foreach ($Disk in $Disks) {
+    $FreeSpacePercent = [math]::Round(($Disk.FreeSpace / $Disk.Size) * 100, 2)
+
+    $Message = "Drive $($Disk.DeviceID) - Free Space: $FreeSpacePercent%"
+
+    # Log output
+    Add-Content -Path $LogFile -Value "$(Get-Date) - $Message"
+
+    # Check threshold
+    if ($FreeSpacePercent -lt $Threshold) {
+        $AlertTriggered = $true
+        Write-Host "ALERT: $Message" -ForegroundColor Red
+    } else {
+        Write-Host $Message -ForegroundColor Green
+    }
+}
+
+# Optional Email Alert
+if ($AlertTriggered) {
+    $SMTPServer = "smtp.yourcompany.com"
+    $From = "alert@company.com"
+    $To = "admin@company.com"
+    $Subject = "Disk Space Alert"
+    $Body = "One or more drives are below $Threshold% free space. Check logs at $LogFile"
+
+    # Uncomment below if SMTP configured
+    # Send-MailMessage -SmtpServer $SMTPServer -From $From -To $To -Subject $Subject -Body $Body
+}
