@@ -1,0 +1,68 @@
+param(
+    [string[]]$Servers    = @($env:COMPUTERNAME),
+    [int]     $HoursBack  = 24,
+    [string]  $ReportPath = "C:\Lab\Reports"
+)
+
+New-Item -Path $ReportPath -ItemType Directory -Force | Out-Null
+$since   = (Get-Date).AddHours(-$HoursBack)
+$alerts  = [System.Collections.Generic.List[object]]::new()
+
+$checks = @(
+    @{ Id=@(4625);       Log='Security'; Severity='High';     Name='Failed Logon'           }
+    @{ Id=@(4740);       Log='Security'; Severity='Critical'; Name='Account Lockout'         }
+    @{ Id=@(4720);       Log='Security'; Severity='High';     Name='New User Created'        }
+    @{ Id=@(4728,4732,4756); Log='Security'; Severity='Critical'; Name='Group Membership Changed' }
+    @{ Id=@(7036);       Log='System';   Severity='Medium';   Name='Service State Changed'  }
+    @{ Id=@(6008,41);    Log='System';   Severity='High';     Name='Unexpected Shutdown'     }
+    @{ Id=@(4698);       Log='Security'; Severity='High';     Name='Scheduled Task Created'  }
+    @{ Id=@(1102);       Log='Security'; Severity='Critical'; Name='Audit Log Cleared'       }
+)
+
+foreach ($server in $Servers) {
+    Write-Host "Scanning $server..." -ForegroundColor Cyan
+
+    foreach ($check in $checks) {
+        try {
+            $events = Get-WinEvent -ComputerName $server -FilterHashtable @{
+                LogName   = $check.Log
+                Id        = $check.Id
+                StartTime = $since
+            } -ErrorAction SilentlyContinue
+
+            if ($events) {
+                $alerts.Add([PSCustomObject]@{
+                    Server    = $server
+                    Severity  = $check.Severity
+                    AlertName = $check.Name
+                    EventIds  = ($check.Id -join ',')
+                    Count     = $events.Count
+                    Latest    = ($events | Sort-Object TimeCreated -Descending |
+                                    Select-Object -First 1).TimeCreated
+                    LogName   = $check.Log
+                })
+            }
+        } catch { }
+    }
+}
+
+# Console output — sorted by severity
+$sevOrder = @{ 'Critical'=1; 'High'=2; 'Medium'=3; 'Low'=4 }
+$sorted   = $alerts | Sort-Object { $sevOrder[$_.Severity] }
+
+Write-Host "`n=== EVENT MONITOR REPORT — Last $HoursBack hours ===" -ForegroundColor Cyan
+foreach ($a in $sorted) {
+    $colour = switch ($a.Severity) {
+        'Critical' { 'Red'    }
+        'High'     { 'Yellow' }
+        default    { 'Gray'   }
+    }
+    Write-Host ("[{0}] {1,-10} {2,-30} Count:{3,4}  Latest:{4}" -f
+        $a.Severity, $a.Server, $a.AlertName,
+        $a.Count, $a.Latest.ToString("HH:mm")) -ForegroundColor $colour
+}
+
+# Export
+$stamp = Get-Date -Format "yyyy-MM-dd_HHmm"
+$alerts | Export-Csv "$ReportPath\EventAlerts_$stamp.csv" -NoTypeInformation
+Write-Host "`nFull report: $ReportPath\EventAlerts_$stamp.csv" -ForegroundColor Cyan
